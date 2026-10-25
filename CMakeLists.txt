@@ -8,6 +8,8 @@ find_package(MPI REQUIRED COMPONENTS C)
 
 add_executable(mpi_bandwidth src/mpi_bandwidth.c)
 target_link_libraries(mpi_bandwidth PRIVATE MPI::MPI_C)
+# Avertissements activés : c'est -Wall qui a révélé la variable rc non initialisée.
+target_compile_options(mpi_bandwidth PRIVATE -Wall -Wextra)
 
 # Options mpiexec propres à l'environnement.
 # En CI (conteneur root, peu de coeurs) :
