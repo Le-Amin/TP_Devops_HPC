@@ -1,0 +1,84 @@
+# Équivalent GitLab CI du workflow .github/workflows/ci.yml (missions 1 et 2).
+# Le dépôt est hébergé sur GitHub : ce fichier n'a pas été exécuté, il sert
+# de référence pour la correspondance GitHub Actions <-> GitLab CI.
+
+stages: [build, test, lint, package, deploy]
+
+variables:
+  OMPI_MCA_btl_vader_single_copy_mechanism: none
+
+default:
+  image: gcc:13-bookworm
+  before_script:
+    - apt-get update -qq
+    - apt-get install -y -qq cmake libopenmpi-dev openmpi-bin openssh-client
+
+build:
+  stage: build
+  script:
+    - cmake -S . -B build -DMPIEXEC_PREFLAGS="--allow-run-as-root;--oversubscribe"
+    - cmake --build build -j
+  artifacts:
+    paths: [build/]
+    expire_in: 1 day
+
+test:
+  stage: test
+  needs: [build]          # récupère les artifacts de build
+  script:
+    - ctest --test-dir build --output-on-failure
+    - mpirun -np 4 --allow-run-as-root --oversubscribe build/mpi_bandwidth
+
+lint:
+  stage: lint
+  needs: []
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq cppcheck
+  script:
+    - cppcheck --enable=warning,performance,portability --error-exitcode=1
+      --inline-suppr --suppress=missingIncludeSystem src/
+
+package:
+  stage: package
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+  before_script: []
+  script:
+    - NAME=mpi_bandwidth-${CI_COMMIT_TAG}
+    - git archive --format=tar.gz --prefix="${NAME}/" -o "${NAME}.tar.gz" HEAD
+    - sha256sum "${NAME}.tar.gz" | tee "${NAME}.tar.gz.sha256"
+    - sha256sum -c "${NAME}.tar.gz.sha256"
+  artifacts:
+    paths: ["mpi_bandwidth-*.tar.gz*"]
+
+registry-login:
+  stage: deploy
+  image: docker:27-cli
+  before_script: []
+  # REGISTRY_PASSWORD : variable CI masquée + protégée (Settings > CI/CD > Variables)
+  script:
+    - echo "$REGISTRY_PASSWORD" | docker login registry.example.invalid -u ci-bot --password-stdin
+      || echo "Échec attendu : registre fictif"
+
+# Mission 3 : soumission Slurm depuis le runner du noeud de connexion.
+slurm:
+  stage: deploy
+  tags: [hpc-login]
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "web"
+  timeout: 30m
+  retry:
+    max: 1
+    when: runner_system_failure   # relance si l'infra CI tombe, jamais sur un échec du code
+  before_script: []
+  script:
+    - source /etc/profile && romeo_load_x64cpu_env && module load openmpi/gnu/4.1.7
+    - mkdir -p build && mpicc -O2 -std=c99 -o build/mpi_bandwidth src/mpi_bandwidth.c
+    - JOBID=$(sbatch --parsable slurm/job_ci.sh build/mpi_bandwidth)
+    - bash slurm/wait_job.sh "$JOBID"
+  artifacts:
+    when: always
+    paths: ["slurm-*.out"]

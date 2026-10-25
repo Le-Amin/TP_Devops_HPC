@@ -1,0 +1,122 @@
+# Missions 1 et 2 - pipeline CI sur les runners partagés GitHub.
+#
+# Équivalences GitLab -> GitHub Actions (le .gitlab-ci.yml équivalent est à la racine) :
+#   stages build/test        -> jobs reliés par needs:
+#   artifacts: + needs:      -> actions/upload-artifact + actions/download-artifact
+#   rules: merge request     -> if: github.event_name == 'pull_request'
+#   rules: $CI_COMMIT_TAG    -> on.push.tags + if: startsWith(github.ref, 'refs/tags/v')
+#   variable masquée         -> secret du dépôt (masqué automatiquement dans les logs)
+#   variable "Protected"     -> secret d'un Environment protégé (environment: registry)
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+  pull_request:
+  workflow_dispatch:
+
+env:
+  # Dans un conteneur Docker, le mécanisme CMA d'OpenMPI (ptrace) échoue souvent.
+  OMPI_MCA_btl_vader_single_copy_mechanism: none
+
+jobs:
+  # ---------------------------------------------------------------- build
+  build:
+    runs-on: ubuntu-latest
+    container: gcc:13-bookworm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Installer CMake et OpenMPI (équivalent before_script)
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq cmake libopenmpi-dev openmpi-bin openssh-client
+      - name: Configurer et compiler
+        run: |
+          cmake -S . -B build \
+                -DMPIEXEC_PREFLAGS="--allow-run-as-root;--oversubscribe"
+          cmake --build build -j
+      - name: Publier le répertoire build pour le job test
+        uses: actions/upload-artifact@v4
+        with:
+          name: build
+          path: build/
+          retention-days: 1
+
+  # ----------------------------------------------------------------- test
+  test:
+    needs: build   # sans needs:, test démarre en parallèle, sans binaire
+    runs-on: ubuntu-latest
+    container: gcc:13-bookworm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Installer le runtime OpenMPI et CTest
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq cmake libopenmpi-dev openmpi-bin openssh-client
+      - name: Récupérer le build
+        uses: actions/download-artifact@v4
+        with:
+          name: build
+          path: build/
+      # upload-artifact ne conserve pas les permissions Unix : bit x perdu.
+      - name: Restaurer le bit exécutable
+        run: chmod +x build/mpi_bandwidth
+      - name: ctest
+        run: ctest --test-dir build --output-on-failure
+      - name: mpirun -np 4
+        run: mpirun -np 4 --allow-run-as-root --oversubscribe build/mpi_bandwidth
+
+  # ----------------------------------------- lint (pull requests uniquement)
+  lint:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Installer cppcheck
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq cppcheck
+      - name: cppcheck
+        run: |
+          cppcheck --enable=warning,performance,portability \
+                   --error-exitcode=1 --inline-suppr \
+                   --suppress=missingIncludeSystem src/
+
+  # ------------------------------------------ package (tags vX.Y.Z uniquement)
+  package:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tarball + sha256sum
+        run: |
+          NAME=mpi_bandwidth-${GITHUB_REF_NAME}
+          git archive --format=tar.gz --prefix="${NAME}/" -o "${NAME}.tar.gz" HEAD
+          sha256sum "${NAME}.tar.gz" | tee "${NAME}.tar.gz.sha256"
+          sha256sum -c "${NAME}.tar.gz.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ github.ref_name }}
+          path: mpi_bandwidth-*.tar.gz*
+
+  # ------------------------------- simulation d'un docker login avec un secret
+  registry-login:
+    needs: test
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: registry   # Environment protégé = variable "Protected"
+    steps:
+      - name: docker login --password-stdin (fausse valeur)
+        env:
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+        run: |
+          if [ -z "$REGISTRY_PASSWORD" ]; then
+            echo "::error::secret REGISTRY_PASSWORD absent (branche non autorisée par l'Environment ?)"
+            exit 1
+          fi
+          echo "Secret affiché dans les logs : $REGISTRY_PASSWORD"   # doit apparaître ***
+          # Registre fictif : l'échec de connexion est attendu. L'important est
+          # que le secret passe par stdin, jamais par la ligne de commande.
+          echo "$REGISTRY_PASSWORD" | docker login registry.example.invalid \
+               -u ci-bot --password-stdin \
+            || echo "Échec attendu : registre fictif"

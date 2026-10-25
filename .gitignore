@@ -1,0 +1,5 @@
+build/
+slurm-*.out
+*.o
+# Spack : seuls spack.yaml et spack.lock sont versionnés
+spack/.spack-env/

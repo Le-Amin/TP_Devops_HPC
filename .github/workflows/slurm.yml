@@ -1,0 +1,90 @@
+# Mission 3 - du CI vers Slurm, sur ROMEO.
+#
+# Le job tourne sur un runner auto-hébergé installé sur le noeud de connexion
+# romeo1 (label hpc-login) : un runner partagé GitHub ne peut pas joindre le
+# cluster. Le workspace du runner est dans le home (système de fichiers
+# partagé), donc visible des noeuds de calcul : binaire et logs y sont communs.
+name: slurm
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Suivi du job Slurm"
+        type: choice
+        options: [polling, wait]
+        default: polling
+  schedule:
+    - cron: '0 2 * * *'    # nightly à 2 h UTC
+
+# Un seul pipeline Slurm à la fois : inutile d'empiler des jobs dans la file.
+concurrency:
+  group: slurm-romeo
+  cancel-in-progress: false
+
+jobs:
+  # ----------------------------------------------- variante polling (défaut)
+  slurm-polling:
+    if: github.event_name == 'schedule' || inputs.mode == 'polling'
+    runs-on: [self-hosted, hpc-login]
+    # Garde-fou CI, indépendant du wall-time Slurm : couvre le temps passé en
+    # PENDING, un runner bloqué, un sacct qui ne répond plus...
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compiler sur le noeud de connexion
+        run: |
+          source /etc/profile
+          romeo_load_x64cpu_env
+          module load openmpi/gnu/4.1.7
+          mkdir -p build
+          mpicc -O2 -std=c99 -o build/mpi_bandwidth src/mpi_bandwidth.c
+
+      - name: Soumettre (sbatch --parsable)
+        id: submit
+        run: |
+          JOBID=$(sbatch --parsable slurm/job_ci.sh build/mpi_bandwidth)
+          echo "Job Slurm soumis : $JOBID"
+          echo "jobid=$JOBID" >> "$GITHUB_OUTPUT"
+
+      - name: Attendre (polling sacct) et vérifier code retour + SUCCESS
+        run: bash slurm/wait_job.sh "${{ steps.submit.outputs.jobid }}"
+
+      - name: Annuler le job Slurm si le pipeline est annulé ou expire
+        if: cancelled()
+        run: scancel "${{ steps.submit.outputs.jobid }}" || true
+
+      - name: Conserver les logs Slurm
+        if: always()      # équivalent de artifacts: when: always
+        uses: actions/upload-artifact@v4
+        with:
+          name: slurm-logs-polling
+          path: slurm-*.out
+          if-no-files-found: warn
+    # Pas d'équivalent natif à retry: when: runner_system_failure dans GitHub
+    # Actions : on relance à la main ("Re-run failed jobs") après diagnostic.
+
+  # ------------------------------------------------- variante sbatch --wait
+  slurm-wait:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'wait'
+    runs-on: [self-hosted, hpc-login]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compiler
+        run: |
+          source /etc/profile && romeo_load_x64cpu_env && module load openmpi/gnu/4.1.7
+          mkdir -p build && mpicc -O2 -std=c99 -o build/mpi_bandwidth src/mpi_bandwidth.c
+      - name: sbatch --wait (bloquant, renvoie le code retour du job)
+        run: |
+          sbatch --wait slurm/job_ci.sh build/mpi_bandwidth
+          cat slurm-*.out
+          grep -q '^SUCCESS' slurm-*.out
+      - name: Conserver les logs Slurm
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: slurm-logs-wait
+          path: slurm-*.out
+          if-no-files-found: warn
