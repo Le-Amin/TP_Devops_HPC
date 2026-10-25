@@ -10,6 +10,7 @@ variables:
 default:
   image: gcc:13-bookworm
   before_script:
+    - ln -sf /usr/local/bin/gfortran /usr/bin/gfortran   # cf. ci.yml (dpkg-divert de l'image gcc)
     - apt-get update -qq
     - apt-get install -y -qq cmake libopenmpi-dev openmpi-bin openssh-client
 
