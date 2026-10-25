@@ -83,7 +83,12 @@ Le secret est passé par `--password-stdin` : `echo "$REGISTRY_PASSWORD" | docke
 ### Preuves d'exécution
 
 - **lint sur PR uniquement** : PR #1 (`mission2-lint`, ajout de `-Wall -Wextra`), run 40217693214 : `lint` ✓ (20 s). Sur les push vers `main`, `lint` apparaît *skipped*.
-- **package sur tag** : tag `v1.0.0` → job `package` (tarball + `sha256sum -c`). _Preuve à compléter après le push du tag._
+- **package sur tag** : tag `v1.0.0`, run [40221511669](https://github.com/Le-Amin/TP_Devops_HPC/actions/runs/40221511669) : `build` ✓, `test` ✓, `package` ✓ ; `lint` et `registry-login` *skipped* (ce n'est ni une PR ni la branche `main`).
+  ```
+  772385f1d4fbf45b7c12f7d0fefc86e7265b2521bf659454ea58db41dfcb9885  mpi_bandwidth-v1.0.0.tar.gz
+  mpi_bandwidth-v1.0.0.tar.gz: OK
+  Artifact package-v1.0.0 has been successfully uploaded! Final size is 28523 bytes.
+  ```
 - **secret masqué**, run [40221117808](https://github.com/Le-Amin/TP_Devops_HPC/actions/runs/40221117808) :
   ```
   env:
