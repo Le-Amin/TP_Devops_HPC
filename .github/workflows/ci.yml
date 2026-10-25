@@ -49,7 +49,7 @@ jobs:
 
   # ----------------------------------------------------------------- test
   test:
-    needs: build   # sans needs:, test démarre en parallèle, sans binaire
+    # needs: build   (EXPERIENCE mission 1 : needs retiré volontairement)
     runs-on: ubuntu-latest
     container: gcc:13-bookworm
     steps:
