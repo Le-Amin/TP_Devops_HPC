@@ -110,7 +110,8 @@ jobs:
   # ------------------------------- simulation d'un docker login avec un secret
   registry-login:
     needs: test
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    # Branche main seulement : l'Environment protégé refuse tout autre ref (tags compris).
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: registry   # Environment protégé = variable "Protected"
     steps:
