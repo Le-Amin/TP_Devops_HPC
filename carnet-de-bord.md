@@ -208,7 +208,7 @@ Côté forge, le job CI est simplement « running » : il consomme son `timeout:
 ### Bilan
 
 - Ça marche : runner sur `romeo1`, soumission, polling, vérification et logs ; variantes polling et `--wait` vertes, job sur 2 nœuds réels.
-- Ça ne marche pas : le runner ne redémarre pas seul (tmux, pas de service systemd). Le dépôt est public, alors qu'un runner auto-hébergé attaché à un dépôt public est un risque (une PR d'un fork pourrait exécuter du code sur ROMEO sous mon compte). Il faut passer le dépôt en privé ou arrêter le runner après la séance.
+- Ça ne marche pas : le runner ne redémarre pas seul (tmux, pas de service systemd). Le dépôt est public, alors qu'un runner auto-hébergé attaché à un dépôt public est un risque (une PR d'un fork pourrait exécuter du code sur ROMEO sous mon compte). Il faut passer le dépôt en privé ou arrêter le runner après la séance : c'est ce qui a été fait (`tmux kill-session -t gh-runner`, plus aucun processus `Runner` actif ; le runner apparaît « Offline » sur GitHub, et le nightly reste en file tant qu'on ne le relance pas).
 - Je referais : runner attaché à un dépôt privé, et workflow compilant via l'environnement Spack de la mission 4 plutôt que via le module.
 
 ---
