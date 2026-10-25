@@ -4,12 +4,14 @@
 # Usage : sbatch slurm/job_ci.sh [chemin/vers/mpi_bandwidth]
 #
 # Adaptations à ROMEO par rapport à l'énoncé (à confirmer avec sinfo) :
+#  - compte Slurm obligatoire (--account=r250127, sinon "Account is missing") ;
 #  - pas de partition "debug" : on utilise la partition courte "instant" ;
 #  - les partitions mélangent noeuds x86 et ARM : la contrainte x64cpu garantit
 #    que le binaire x86 compilé sur romeo1 s'exécute ;
 #  - l'environnement x86 s'active avec romeo_load_x64cpu_env avant module load.
 #
 #SBATCH --job-name=ci-mpi-bw
+#SBATCH --account=r250127
 #SBATCH --partition=instant
 #SBATCH --constraint=x64cpu
 #SBATCH --nodes=2
